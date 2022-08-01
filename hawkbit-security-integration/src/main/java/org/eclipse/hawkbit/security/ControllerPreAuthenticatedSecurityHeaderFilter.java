@@ -119,24 +119,30 @@ public class ControllerPreAuthenticatedSecurityHeaderFilter extends AbstractCont
      * this tenant.
      */
     private String getIssuerHashHeader(final DmfTenantSecurityToken securityToken, final String knownIssuerHashes) {
+        String foundHash;
         // there may be several knownIssuerHashes configured for the tenant
         final List<String> knownHashes = splitMultiHashBySemicolon(knownIssuerHashes);
-
-        // iterate over the headers until we get a null header.
-        int iHeader = 1;
-        String foundHash;
-        while ((foundHash = securityToken.getHeader(String.format(sslIssuerHashBasicHeader, iHeader))) != null) {
-            if (knownHashes.contains(foundHash.toLowerCase())) {
-                if (LOGGER.isTraceEnabled()) {
-                    LOGGER.trace("Found matching ssl issuer hash at position {}", iHeader);
+        if (sslIssuerHashBasicHeader.contains("%d")) {
+            // iterate over the headers until we get a null header.
+            int iHeader = 1;
+            while ((foundHash = securityToken.getHeader(String.format(sslIssuerHashBasicHeader, iHeader))) != null) {
+                if (knownHashes.contains(foundHash.toLowerCase())) {
+                    if (LOGGER.isTraceEnabled()) {
+                        LOGGER.trace("Found matching ssl issuer hash at position {}", iHeader);
+                    }
+                    return foundHash.toLowerCase();
                 }
-                return foundHash.toLowerCase();
+                iHeader++;
             }
-            iHeader++;
+        } else if ((foundHash = securityToken.getHeader(sslIssuerHashBasicHeader)) != null && knownHashes.contains(foundHash.toLowerCase())) {
+            if (LOGGER.isTraceEnabled()) {
+                LOGGER.trace("Found matching ssl issuer hash");
+            }
+            return foundHash.toLowerCase();
         }
         LOG_SECURITY_AUTH.debug(
                 "Certificate request but no matching hash found in headers {} for common name {} in request",
-                sslIssuerHashBasicHeader, securityToken.getHeader(caCommonNameHeader));
+                sslIssuerHashBasicHeader, getCommonNameHeader(securityToken));
         return null;
     }
 
@@ -154,6 +160,25 @@ public class ControllerPreAuthenticatedSecurityHeaderFilter extends AbstractCont
     }
 
     private static List<String> splitMultiHashBySemicolon(final String knownIssuerHashes) {
-        return Arrays.stream(knownIssuerHashes.split("[;,]")).map(String::toLowerCase).collect(Collectors.toList());
+        return Arrays.stream(knownIssuerHashes.split(";")).map(String::toLowerCase).collect(Collectors.toList());
+    }
+
+    private String getCommonNameHeader(final DmfTenantSecurityToken securityToken) {
+        String header = securityToken.getHeader(caCommonNameHeader);
+        if (header == null) {
+            return null;
+        }
+        int begin = header.indexOf("CN=");
+        if (begin == -1) {
+            return header;
+        } else {
+            begin += 3;
+        }
+        int end = header.indexOf(",", begin);
+        if (end == -1) {
+            return header.substring(begin);
+        } else {
+            return header.substring(begin, end);
+        }
     }
 }
